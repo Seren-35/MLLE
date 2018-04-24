@@ -1,16 +1,17 @@
 ﻿using System.Collections.Generic;
 using System.IO;
 using Ionic.Zlib;
+using Ionic.Crc;
 using System.Text.RegularExpressions;
 
 namespace MLLE
 {
     public partial struct PlusPropertyList
     {
-        const uint CurrentMLLEData5Version = 0x103;
+        const uint CurrentMLLEData5Version = 0x104;
         const string MLLEData5MagicString = "MLLE";
-        const string CurrentMLLEData5VersionStringForComparison = "0x103";
-        const string CurrentMLLEData5VersionString = "1.3";
+        const string CurrentMLLEData5VersionStringForComparison = "0x104";
+        const string CurrentMLLEData5VersionString = "1.4";
         const string AngelscriptLibraryFilename = "MLLE-Include-" + CurrentMLLEData5VersionString + ".asc";
 
         const string AngelscriptLibraryCallStockLine = "const bool MLLESetupSuccessful = MLLE::Setup();\r\n";
@@ -50,6 +51,10 @@ namespace MLLE {
         }
         
         jjSTREAM level(jjLevelFileName);
+        if (level.isEmpty()) {
+            jjDebug('MLLE::Setup: Level file cannot be read from that folder for security reasons!');
+            return false;
+        }
         level.discard(230);
         array<uint> CompressedDataSizes(4, 0);
         for (uint i = 0; i < CompressedDataSizes.length; ++i) {
@@ -202,7 +207,7 @@ namespace MLLE {
             for (int y = 0; y < 32; ++y)
                 for (int x = 0; x < 32; ++x)
                     data5.pop(tile[x,y]);
-            tile.save(tileID);
+            tile.save(tileID, true);
         }
 
         if (!data5.isEmpty()) {
@@ -285,6 +290,11 @@ namespace MLLE {
             string fileContents = "";
             if (File.Exists(scriptFilepath))
                 fileContents = System.IO.File.ReadAllText(scriptFilepath, encoding);
+            {
+                string pragma = GetPragmaRequire(Path.GetFileName(filepath));
+                if (!fileContents.Contains(pragma))
+                    fileContents = pragma + fileContents;
+            }
             for (int i = 1; i < Tilesets.Count; ++i)
             {
                 string pragma = GetPragmaRequire(Tilesets[i].FilenameOnly);

@@ -467,7 +467,7 @@ namespace MLLE
                 for (int tilesetID = 1; tilesetID < Tilesets.Count; ++tilesetID) //Tilesets[0] is already mentioned in Data1, after all
                 {
                     var tileset = Tilesets[tilesetID];
-                    data5bodywriter.Write(tileset.FilenameOnly);
+                    data5bodywriter.Write(tileset.FilenameOnly.ToLowerInvariant());
                     data5bodywriter.Write((ushort)tileset.FirstTile);
                     data5bodywriter.Write((ushort)tileset.TileCount);
                     byte[] remappings = tileset.ColorRemapping;
@@ -491,7 +491,7 @@ namespace MLLE
 
                 int levelTileCount = Tilesets.Sum(ts => (int)ts.TileCount);
                 foreach (byte[][] images in new byte[][][] { TileImages, TileMasks }) {
-                    int numberOfImages = images.Count(it => it != null);
+                    int numberOfImages = images.Take(levelTileCount).Count(it => it != null);
                     data5bodywriter.Write((ushort)numberOfImages);
                     if (numberOfImages > 0)
                         for (int i = 1; i < levelTileCount; ++i)

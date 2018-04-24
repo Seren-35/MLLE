@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Drawing;
 using System.Linq;
 using System.IO;
+using System.IO.Compression;
 using System.Text;
 using System.Windows.Forms;
 using System.Diagnostics;
@@ -151,6 +152,8 @@ namespace MLLE
         }
 
         public AGAEvent ActiveEvent;
+
+        private List<string> RecentlyLoadedLevels = new List<string>();
         #endregion variable declaration
 
         #region Form Business
@@ -337,6 +340,16 @@ namespace MLLE
             }
             MakeVersionChangesAvailable();
 
+
+            for (int i = 1; i <= 10; ++i)
+            {
+                string recentLevel = Settings.IniReadValue("RecentLevels", i.ToString());
+                if (recentLevel != String.Empty)
+                    RecentlyLoadedLevels.Add(recentLevel);
+                else
+                    break;
+            }
+
             DefaultDirectories = new Dictionary<Version, string> {
             {Version.BC, Settings.IniReadValue("Paths","BC") },
             {Version.O, Settings.IniReadValue("Paths","O") },
@@ -345,6 +358,10 @@ namespace MLLE
             {Version.AGA, Settings.IniReadValue("Paths","AGA") },
             {Version.GorH, Settings.IniReadValue("Paths","GorH") },
             };
+            if (DefaultDirectories[Version.JJ2].Trim() == String.Empty)
+                DefaultDirectories[Version.JJ2] = DefaultDirectories[Version.TSF];
+            else if (DefaultDirectories[Version.TSF].Trim() == String.Empty)
+                DefaultDirectories[Version.TSF] = DefaultDirectories[Version.JJ2];
             ProcessIniColorsIntoHotKolor(0, "Colors", "Deadspace");
             ProcessIniColorsIntoHotKolor(1, "Colors", "Tile0");
             ProcessIniColorsIntoHotKolor(2, "Colors", "Transparent");
@@ -444,6 +461,13 @@ namespace MLLE
             MakeProposedScrollbarValueWork(scrollbarToMove, scrollbarToMove.Value - scrollbarToMove.SmallChange * e.Delta / 120);
         }
 
+        private void DeleteLevelScriptIfEmpty()
+        {
+            string scriptFilePath = Path.ChangeExtension(J2L.FullFilePath, ".j2as");
+            if (File.Exists(scriptFilePath) && new FileInfo(scriptFilePath).Length == 0) //if you created a script for this level while editing it, but didn't write anything in the script, just delete it afterwards
+                File.Delete(scriptFilePath);
+        }
+
         private void Mainframe_FormClosing(object sender, FormClosingEventArgs e) {
             if (!PromptForSaving())
             {
@@ -454,7 +478,9 @@ namespace MLLE
             if (DrawThread != null)
                 DrawThread.Abort();
 
-            bool windowIsMaximized = this.WindowState == FormWindowState.Maximized;
+            DeleteLevelScriptIfEmpty();
+
+                bool windowIsMaximized = this.WindowState == FormWindowState.Maximized;
             Settings.IniWriteValue("Window", "Maximized", windowIsMaximized.ToString());
             if (!windowIsMaximized)
             {
@@ -1219,7 +1245,8 @@ namespace MLLE
                             EmptyActionStackIfItContainsVerticallyFlippedTiles(Undoable);
                             EmptyActionStackIfItContainsVerticallyFlippedTiles(Redoable);
                         }
-                        J2L.Generate_Textures(); //in case any tile types are treated differently in this new version
+                        if (J2L.HasTiles)
+                            J2L.Generate_Textures(); //in case any tile types are treated differently in this new version
                         RedrawTilesetHowManyTimes = 2;
                         break;
                     case VersionChangeResults.TilesetTooBig:
@@ -1251,7 +1278,11 @@ namespace MLLE
             OpenJ2LDialog.FileName = J2L.NextLevel + DefaultFileExtensionStrings[DefaultFileExtension[J2L.VersionType]];
             _suspendEvent.Reset();
             DialogResult result = OpenJ2LDialog.ShowDialog();
-            if (result == DialogResult.OK && PromptForSaving()) LoadJ2L(OpenJ2LDialog.FileName);
+            if (result == DialogResult.OK && PromptForSaving())
+            {
+                DeleteLevelScriptIfEmpty();
+                LoadJ2L(OpenJ2LDialog.FileName);
+            }
             _suspendEvent.Set();
         }
         internal void LoadJ2L(string filename)
@@ -1318,6 +1349,12 @@ namespace MLLE
                     ProcessIni(J2L.VersionType);
                 }
                 SetTitle(J2L.Name, J2L.FilenameOnly);
+                RecentlyLoadedLevels.RemoveAll(fn => fn == filename); //no dupes
+                RecentlyLoadedLevels.Insert(0, filename);
+                for (int i = 0; i < 10 && i < RecentlyLoadedLevels.Count; ++i)
+                {
+                    Settings.IniWriteValue("RecentLevels", (i + 1).ToString(), RecentlyLoadedLevels[i]);
+                }
                 J2L.Generate_Textures(TransparencySource.JJ2_Style, true);
                 GL.BindTexture(TextureTarget.Texture2D, J2L.ImageAtlas);
                 Undoable.Clear();
@@ -1480,6 +1517,39 @@ namespace MLLE
             }
             else return true;
         }
+        void MakeBackup(string filepath)
+        {
+            List<string> filenamesToMakeBackupsOf = new List<string>();
+            filenamesToMakeBackupsOf.Add(filepath);
+
+            string scriptFilename = Path.ChangeExtension(filepath, ".j2as");
+            if (File.Exists(scriptFilename))
+            {
+                filenamesToMakeBackupsOf.Add(scriptFilename);
+                int extraDataFileID = 0;
+                while (true)
+                {
+                    string extraDataFilePath = PlusPropertyList.GetExtraDataLevelFilepath(filepath, extraDataFileID);
+                    if (File.Exists(extraDataFilePath))
+                        filenamesToMakeBackupsOf.Add(extraDataFilePath);
+                    else
+                        break;
+                    ++extraDataFileID;
+                }
+            }
+
+            var backupDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Backups");
+            if (!Directory.Exists(backupDirectory))
+                Directory.CreateDirectory(backupDirectory);
+
+            using (var zip = ZipFile.Open(Path.Combine(backupDirectory, Path.GetFileNameWithoutExtension(J2L.FilenameOnly) + " " + DateTime.Now.ToString("MM-dd-yyyy hh-mm-ss tt") + ".zip"), ZipArchiveMode.Create))
+                foreach (string filename in filenamesToMakeBackupsOf)
+                    zip.CreateEntryFromFile(filename, Path.GetFileName(filename));
+
+            var AllBackupFiles = new DirectoryInfo(backupDirectory).GetFiles("*.zip", SearchOption.TopDirectoryOnly); //check how many backups have been made now
+            if (AllBackupFiles.Length > 100) //more than a hundred backup files in this folder
+                File.Delete(AllBackupFiles.OrderBy(f => f.CreationTime).First().FullName); //delete the oldest one
+        }
         internal SavingResults SaveJ2L(string filename, bool eraseUndefinedTiles = false, bool allowDifferentTilesetVersion = false, bool storeGivenFilename = true)
         {
             _suspendEvent.Reset();
@@ -1503,6 +1573,8 @@ namespace MLLE
                 PlusPropertyList.RemovePriorReferencesToMLLELibrary(filename);
                 if (Data5 != null)
                     J2L.PlusPropertyList.SaveLibrary(filename, J2L.Tilesets, (J2L.AllLayers.Count(l => !l.isDefault) + 7) / 8);
+
+                MakeBackup(filename);
             }
             else if (result == SavingResults.NoTilesetSelected)
             {
@@ -2874,10 +2946,19 @@ namespace MLLE
         }
         private void MakeSelectionIntoStamp(bool cut = false)
         {
-            if (WhereSelected != FocusedZone.None)
+            if (WhereSelected != FocusedZone.None && BottomRightSelectionCorner.X > UpperLeftSelectionCorner.X && BottomRightSelectionCorner.Y > UpperLeftSelectionCorner.Y)
             {
                 var tileMap = CurrentLayer.TileMap;
+                if (WhereSelected == FocusedZone.Level)
+                {
+                    int width = tileMap.GetLength(0), height = tileMap.GetLength(1);
+                    if (UpperLeftSelectionCorner.X >= width || UpperLeftSelectionCorner.Y >= height)
+                        return; //nothing can be done
+                    BottomRightSelectionCorner.X = Math.Min(BottomRightSelectionCorner.X, width);
+                    BottomRightSelectionCorner.Y = Math.Min(BottomRightSelectionCorner.Y, height);
+                }
                 SetStampDimensions(BottomRightSelectionCorner.X - UpperLeftSelectionCorner.X, BottomRightSelectionCorner.Y - UpperLeftSelectionCorner.Y);
+                bool EditingSpriteLayer = CurrentLayer == J2L.SpriteLayer;
                 for (int x = UpperLeftSelectionCorner.X; x < BottomRightSelectionCorner.X; x++)
                     for (int y = UpperLeftSelectionCorner.Y; y < BottomRightSelectionCorner.Y; y++)
                         if (IsEachTileSelected[x + 1][y + 1])
@@ -2885,10 +2966,11 @@ namespace MLLE
                             TileAndEvent tileToAddToStamp;
                             if ((WhereSelected == FocusedZone.Level))
                             {
-                                tileToAddToStamp = new TileAndEvent(tileMap[x, y], J2L.EventMap[x, y]);
+                                tileToAddToStamp = new TileAndEvent(tileMap[x, y], EditingSpriteLayer ? J2L.EventMap[x, y] : 0);
                                 if (cut) {
                                     tileMap[x, y] = 0;
-                                    J2L.EventMap[x, y] = 0;
+                                    if (EditingSpriteLayer)
+                                        J2L.EventMap[x, y] = 0;
                                 }
                             }
                             else
@@ -2948,6 +3030,31 @@ namespace MLLE
         //Rectangle DrawRect = new Rectangle();
         Point DrawPoint = new Point();
         Queue<Point> FillingQ = new Queue<Point>();
+
+        private void editScriptToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            string scriptFilePath = Path.ChangeExtension(J2L.FullFilePath, ".j2as");
+            if (!File.Exists(scriptFilePath))
+                File.Create(scriptFilePath).Close(); //blank file
+           Process.Start(scriptFilePath);
+        }
+
+        private void fileToolStripMenuItem_DropDownOpening(object sender, EventArgs e)
+        {
+            recentLevelsToolStripMenuItem.DropDownItems.Clear();
+            recentLevelsToolStripMenuItem.Enabled = RecentlyLoadedLevels.Count > 0;
+            for (int i = 0; i < RecentlyLoadedLevels.Count; ++i)
+            {
+                string recentLevel = RecentlyLoadedLevels[i];
+
+                var toolStripItem = new ToolStripMenuItem((i + 1).ToString() + " " + Path.GetFileName(recentLevel));
+                toolStripItem.Click += (s, ee) => {
+                    LoadJ2L(recentLevel);
+                };
+
+                recentLevelsToolStripMenuItem.DropDownItems.Add(toolStripItem);
+            }
+        }
 
         private void ActOnATile(int x, int y, ushort? tile, uint ev, LayerAndSpecificTiles actionCenter, bool blankTilesOkay) { ActOnATile(x, y, tile, new AGAEvent(ev), actionCenter, blankTilesOkay); }
         private void ActOnATile(int x, int y, ushort? tile, AGAEvent? ev, LayerAndSpecificTiles actionCenter, bool blankTilesOkay)
