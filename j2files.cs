@@ -976,6 +976,7 @@ class J2LFile : J2File
     }
 
     const uint SecurityStringMLLE = 0xBACABEEF;
+    const uint SecurityStringMLLEWithPlugins = 0xBADABEEF;
     const uint SecurityStringPassworded = 0xBA00BE00;
     public const uint SecurityStringExtraDataNotForDirectEditing = 0xBA01BE01;
     const uint SecurityStringInsecure = 0;
@@ -1033,7 +1034,7 @@ class J2LFile : J2File
 
     int[] AGAMostValues = new int[256], AGAMostStrings = new int[256];
 
-    public OpeningResults OpenLevel(string filename, ref byte[] Data5, string password = null, Dictionary<Version, string> defaultDirectories = null, Encoding encoding = null, uint? SecurityStringOverride = null)
+    public OpeningResults OpenLevel(string filename, ref byte[] Data5, string password = null, Dictionary<Version, string> defaultDirectories = null, Encoding encoding = null, MLLE.PluginHost plugins = null, uint? SecurityStringOverride = null)
     {
         encoding = encoding ?? FileEncoding;
         using (BinaryReader binreader = new BinaryReader(File.Open(filename, FileMode.Open, FileAccess.Read), encoding))
@@ -1107,6 +1108,7 @@ class J2LFile : J2File
                             case SecurityStringInsecure:
                             case SecurityStringPassworded:
                             case SecurityStringMLLE:
+                            case SecurityStringMLLEWithPlugins:
                                 break;
                             default:
                                 return OpeningResults.SecurityEnvelopeDamaged;
@@ -1319,9 +1321,29 @@ class J2LFile : J2File
                 }
                 #endregion data4
                 #region data5
-                var remainingLength = binreader.BaseStream.Length - binreader.BaseStream.Position;
-                if (remainingLength > 0)
-                    Data5 = binreader.ReadBytes((int)remainingLength); //let the application figure out what to do with them
+                while (binreader.BaseStream.Position < binreader.BaseStream.Length)
+                {
+                    var identifier = binreader.ReadUInt32();
+                    var version = binreader.ReadUInt32();
+                    var compLength = binreader.ReadInt32();
+                    var uncompLength = binreader.ReadInt32();
+                    // TODO: Name the constant
+                    if (identifier == 0x454C4C4D)
+                    {
+                        binreader.BaseStream.Seek(-16, SeekOrigin.Current);
+                        Data5 = binreader.ReadBytes(compLength + 16); //let the application figure out what to do with them
+                    }
+                    else
+                    {
+                        var data = new MLLE.PluginSerializedData
+                        {
+                            Identifier = identifier,
+                            Version = version,
+                            Content = ZlibStream.UncompressBuffer(binreader.ReadBytes(compLength)),
+                        };
+                        plugins.LevelLoad(data);
+                    }
+                }
                 #endregion
             }
             else // is a .LEV file
@@ -1565,8 +1587,8 @@ class J2LFile : J2File
             }
         }
     }
-    public SavingResults Save(bool eraseUndefinedTiles = false, bool allowDifferentTilesetVersion = false, byte[] Data5 = null) { return Save(FullFilePath, eraseUndefinedTiles, allowDifferentTilesetVersion, false, Data5); }
-    public SavingResults Save(string filename, bool eraseUndefinedTiles = false, bool allowDifferentTilesetVersion = false, bool storeGivenFilename = true, byte[] Data5 = null)
+    public SavingResults Save(bool eraseUndefinedTiles = false, bool allowDifferentTilesetVersion = false, byte[] Data5 = null, MLLE.PluginHost plugins = null) { return Save(FullFilePath, eraseUndefinedTiles, allowDifferentTilesetVersion, false, Data5, plugins); }
+    public SavingResults Save(string filename, bool eraseUndefinedTiles = false, bool allowDifferentTilesetVersion = false, bool storeGivenFilename = true, byte[] Data5 = null, MLLE.PluginHost plugins = null)
     {
         if (!HasTiles)
         {
@@ -1857,12 +1879,26 @@ class J2LFile : J2File
                 bool extraDataLevel = layerArrayID != 0;
                 var layersToSave = LayerArraysToSave[layerArrayID];
 
+                IEnumerable<MLLE.PluginSerializedData> pluginData = null;
+                if (!extraDataLevel)
+                {
+                    pluginData = plugins?.LevelSave();
+                    if (pluginData != null && pluginData.Count() == 0)
+                    {
+                        pluginData = null;
+                    }
+                }
+
                 using (BinaryWriter data1writer = new BinaryWriter(CompressedData[0], encoding, true))
                 {
                     uint SecurityString;
                     if (extraDataLevel) //junk level for storing extra data in
                     {
                         SecurityString = SecurityStringExtraDataNotForDirectEditing;
+                    }
+                    else if (pluginData != null) //contains output produced by plugins
+                    {
+                        SecurityString = SecurityStringMLLEWithPlugins;
                     }
                     else if (Data5 != null) //plus-only level, so damage the security envelope for JCS
                     {
@@ -2038,10 +2074,25 @@ class J2LFile : J2File
                         CompressedDataLength[i] = zcomparray.Length;
                         CRCCalculator.SlurpBlock(zcomparray, 0, zcomparray.Length);
                     }
-                    if (!extraDataLevel && Data5 != null)
+                    if (!extraDataLevel)
                     {
-                        binwriter.Write(Data5); //immediately after the compressed Data4 block
-                        CRCCalculator.SlurpBlock(Data5, 0, Data5.Length);
+                        if (Data5 != null)
+                        {
+                            binwriter.Write(Data5); //immediately after the compressed Data4 block
+                            CRCCalculator.SlurpBlock(Data5, 0, Data5.Length);
+                        }
+                        if (pluginData != null)
+                        {
+                            foreach (var data in pluginData)
+                            {
+                                var zcomparray = ZlibStream.CompressBuffer(data.Content);
+                                binwriter.Write(data.Identifier);
+                                binwriter.Write(data.Version);
+                                binwriter.Write((uint)zcomparray.Length);
+                                binwriter.Write((uint)data.Content.Length);
+                                binwriter.Write(zcomparray);
+                            }
+                        }
                     }
                     binwriter.Seek(encoding.GetByteCount(Header) + 42, 0);
                     binwriter.Write((int)(binwriter.BaseStream.Length));

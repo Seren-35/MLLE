@@ -104,6 +104,8 @@
     <Compile Include="PasswordInputForm.Designer.cs">
       <DependentUpon>PasswordInputForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="PluginHost.cs" />
+    <Compile Include="PluginInterface.cs" />
     <Compile Include="PlusAngelscriptLibrary.cs" />
     <Compile Include="PlusProperties.cs">
       <SubType>Form</SubType>
@@ -194,6 +196,7 @@
     <Reference Include="OpenTK, Version=1.0.0.0, Culture=neutral, PublicKeyToken=bad199fe84eb3df4, processorArchitecture=MSIL" />
     <Reference Include="OpenTK.GLControl, Version=1.0.0.0, Culture=neutral, PublicKeyToken=bad199fe84eb3df4, processorArchitecture=MSIL" />
     <Reference Include="System" />
+    <Reference Include="System.ComponentModel.Composition" />
     <Reference Include="System.Data" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.IO.Compression" />

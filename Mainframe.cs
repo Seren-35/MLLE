@@ -154,6 +154,8 @@ namespace MLLE
         public AGAEvent ActiveEvent;
 
         private List<string> RecentlyLoadedLevels = new List<string>();
+
+        internal PluginHost Plugins = new PluginHost();
         #endregion variable declaration
 
         #region Form Business
@@ -349,6 +351,8 @@ namespace MLLE
                 else
                     break;
             }
+
+            Plugins.LoadAll();
 
             DefaultDirectories = new Dictionary<Version, string> {
             {Version.BC, Settings.IniReadValue("Paths","BC") },
@@ -1294,7 +1298,7 @@ namespace MLLE
             filename = System.Text.RegularExpressions.Regex.Replace(filename, "-MLLE-Data-\\d+", ""); //if the user tries to open an extra data level, open its corresponding real level instead
         TRYTOOPEN:
             byte[] Data5 = null;
-            OpeningResults openResults = J2L.OpenLevel(filename, ref Data5, newPassword, DefaultDirectories, encoding);
+            OpeningResults openResults = J2L.OpenLevel(filename, ref Data5, newPassword, DefaultDirectories, encoding, Plugins);
             if (openResults == OpeningResults.PasswordNeeded || openResults == OpeningResults.WrongPassword)
             {
                 _suspendEvent.Reset();
@@ -1561,7 +1565,7 @@ namespace MLLE
             if (EnableableBools[J2L.VersionType][EnableableTitles.BoolDevelopingForPlus] && J2L.PlusOnly)
                 J2L.PlusPropertyList.CreateData5Section(ref Data5, J2L.Tilesets, J2L.AllLayers);
 
-            SavingResults result = J2L.Save(filename, eraseUndefinedTiles, allowDifferentTilesetVersion, storeGivenFilename, Data5);
+            SavingResults result = J2L.Save(filename, eraseUndefinedTiles, allowDifferentTilesetVersion, storeGivenFilename, Data5, Plugins);
             if (result == SavingResults.Success)
             {
                 if (storeGivenFilename)
