@@ -155,7 +155,7 @@ namespace MLLE
 
         private List<string> RecentlyLoadedLevels = new List<string>();
 
-        internal PluginHost Plugins = new PluginHost();
+        internal PluginHost Plugins;
         #endregion variable declaration
 
         #region Form Business
@@ -352,6 +352,7 @@ namespace MLLE
                     break;
             }
 
+            Plugins = new PluginHost { AddToolCallback = AddNewTool };
             Plugins.LoadAll();
 
             DefaultDirectories = new Dictionary<Version, string> {
@@ -745,6 +746,13 @@ namespace MLLE
                 RedrawTilesetHowManyTimes = 2;
             LevelHasBeenModified = true;
             return true;
+        }
+
+        private void AddNewTool(ToolStripItem item, bool usable)
+        {
+            if (usable)
+                item.Click += DrawingToolButton_Click;
+            DrawingTools.Items.Add(item);
         }
 
         private void imageToolStripMenuItem_Click(object sender, EventArgs e)
@@ -3194,6 +3202,12 @@ namespace MLLE
                         }
             }
             #endregion rectangles
+            #region plugin tools
+            else
+            {
+                // TODO
+            }
+            #endregion plugin tools
 
             if (ActionCenter.Specifics.Count > 0)
             {

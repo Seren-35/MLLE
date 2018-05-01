@@ -1,9 +1,15 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.IO;
+using System.Drawing;
 
 namespace MLLE
 {
+    public class ToolContext
+    {
+        public Image Image { get; set; }
+        public EventHandler OnSelect { get; set; }
+        public EventHandler OnUse { get; set; }
+    }
+
     public class PluginSerializedData : EventArgs
     {
         public uint Identifier { get; set; }
@@ -15,6 +21,8 @@ namespace MLLE
     {
         event EventHandler<PluginSerializedData> OnLevelSave;
         event EventHandler<PluginSerializedData> OnLevelLoad;
+
+        void AddTool(ToolContext context);
     }
 
     public interface IPlugin

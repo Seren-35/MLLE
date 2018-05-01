@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.ComponentModel.Composition.Hosting;
+using System.Windows.Forms;
 
 namespace MLLE
 {
@@ -9,6 +10,9 @@ namespace MLLE
     {
         [ImportMany]
         private IEnumerable<IPlugin> plugins;
+
+        public delegate void AddToolDelegate(ToolStripItem item, bool usable);
+        public AddToolDelegate AddToolCallback { get; set; }
 
         public event EventHandler<PluginSerializedData> OnLevelSave;
         public event EventHandler<PluginSerializedData> OnLevelLoad;
@@ -103,6 +107,28 @@ namespace MLLE
                 }
                 plugins = null;
             }
+        }
+
+        private EventHandler Wrap(EventHandler callback)
+        {
+            if (callback == null)
+                return null;
+            return delegate (object sender, EventArgs e) {
+                try
+                {
+                    callback(sender, e);
+                }
+                catch (Exception exception)
+                {
+                    // TODO: Inform user of plugin failure
+                }
+            };
+        }
+
+        public void AddTool(ToolContext context)
+        {
+            var item = new ToolStripButton(null, context.Image, Wrap(context.OnSelect));
+            AddToolCallback(item, context.OnUse != null);
         }
     }
 }
