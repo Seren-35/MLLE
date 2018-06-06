@@ -396,6 +396,7 @@ namespace MLLE
         {
             get
             {
+                var comparableBlack = Color.Black.ToArgb();
                 if (
                     IsSnowing ||
                     IsSnowingOutdoorsOnly ||
@@ -404,14 +405,14 @@ namespace MLLE
                     !WarpsTransmuteCoins ||
                     DelayGeneratedCrateOrigins ||
                     Echo != 0 ||
-                    DarknessColor != Color.Black ||
+                    DarknessColor.ToArgb() != comparableBlack ||
                     WaterChangeSpeed != 1 ||
                     WaterInteraction != WaterInteractionEnum.PositionBased ||
                     WaterLayer != 1 ||
                     WaterLighting != WaterLightingEnum.None ||
                     WaterLevel != DefaultWaterLevel ||
-                    WaterGradientStart != Color.Black ||
-                    WaterGradientStop != Color.Black ||
+                    WaterGradientStart.ToArgb() != comparableBlack ||
+                    WaterGradientStop.ToArgb() != comparableBlack ||
                     Palette != null ||
                     ColorRemappings.FirstOrDefault(it => it != null) != null ||
                     TileImages.FirstOrDefault(it => it != null) != null ||
@@ -467,7 +468,7 @@ namespace MLLE
                 for (int tilesetID = 1; tilesetID < Tilesets.Count; ++tilesetID) //Tilesets[0] is already mentioned in Data1, after all
                 {
                     var tileset = Tilesets[tilesetID];
-                    data5bodywriter.Write(tileset.FilenameOnly.ToLowerInvariant());
+                    data5bodywriter.Write(Path.ChangeExtension(tileset.FilenameOnly, ".j2t")); //convert "J2T" to "j2t" so JJ2+ doesn't reject the jjTilesFromTileset call
                     data5bodywriter.Write((ushort)tileset.FirstTile);
                     data5bodywriter.Write((ushort)tileset.TileCount);
                     byte[] remappings = tileset.ColorRemapping;
