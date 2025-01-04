@@ -26,8 +26,7 @@ $RECYCLE.BIN/
 [Bb]in
 [Oo]bj
 
-# Cache/options directory
-.vs/
+.vs
 
 # =========================
 # Operating System Files

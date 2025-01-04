@@ -18,6 +18,7 @@ namespace MLLE
         byte MostParametersSeenThusFar = 1;
         Mainframe SourceForm;
         string[] CurrentEvent;
+        string[][] LevelSpecificEventStringList;
         byte CurrentEventID;
         Version version;
         //public uint resultint;
@@ -37,12 +38,14 @@ namespace MLLE
         Dictionary<ComboBox, List<ComboBox>> CombosPointingToCombos;
         bool SafeToCalculate = false, SafeToCacheOldParameters = false;
         static List<UInt32> LastUsedEvents = new List<UInt32>(0);
-        public EventForm(Mainframe parent, TreeNode[] nodes, Version theVersion, AGAEvent inputevent)
+        List<Mainframe.StringAndIndex> FlatEventList;
+        public EventForm(Mainframe parent, TreeNode[] nodes, Version theVersion, AGAEvent inputevent, string[][] eventStrings, ImageList treeImageList)
         {
             WorkingEvent = inputevent;
             SourceForm = parent;
             parent.SelectReturnAGAEvent = null;
             version = theVersion;
+            LevelSpecificEventStringList = eventStrings;
             InitializeComponent();
             int arrayLength = (version == Version.AGA) ? 24 : 6;
             ParamBoxes = new NumericUpDown[arrayLength]; ParamBoxes[0] = numericUpDown1;
@@ -57,7 +60,11 @@ namespace MLLE
             }
             else textBox1.Dispose();
             CombosPointingToCombos = new Dictionary<ComboBox, List<ComboBox>> { { comboBox1, new List<ComboBox>() } };
-            Tree.Nodes.Add("0", "(none)"); //always present
+            Tree.ImageList = treeImageList;
+            Tree.ShowLines = treeImageList == null;
+            Tree.Indent = (treeImageList == null) ? 19 : 6;
+            Tree.DrawMode = (treeImageList == null) ? TreeViewDrawMode.Normal : TreeViewDrawMode.OwnerDrawAll;
+            Tree.Nodes.Add("0", "(none)", 0); //always present
             Tree.Nodes.AddRange(nodes);
             Tree.Sort();
             if (version != Version.AGA)
@@ -68,13 +75,15 @@ namespace MLLE
                     var recentNodes = new TreeNode("[Recent]");
                     foreach (UInt32 lastEvent in LastUsedEvents)
                     {
-                        var node = new TreeNode(SourceForm.NameEvent(lastEvent, "(unknown)"));
+                        var node = new TreeNode(SourceForm.NameEvent(lastEvent, "(unknown)"), (int)lastEvent & 0xFF, (int)lastEvent & 0xFF);
                         node.Tag = lastEvent;
                         recentNodes.Nodes.Add(node);
                     }
                     Tree.Nodes.Add(recentNodes);
                 }
             }
+            ListBox.Size = Tree.Size;
+            FlatEventList = SourceForm.FlatEventLists[SourceForm.J2L.VersionType];
         }
 
         void SetTextOfAndPossiblyCreateLabel(byte id, string text)
@@ -162,7 +171,7 @@ namespace MLLE
         private void EventForm_Load(object sender, EventArgs e)
         {
             CurrentEventID = (byte)(WorkingEvent.ID & 255);
-            CurrentEvent = TexturedJ2L.IniEventListing[SourceForm.J2L.VersionType][CurrentEventID];
+            CurrentEvent = LevelSpecificEventStringList[CurrentEventID];
             MostParametersSeenThusFar = (byte)(Math.Max(1, CurrentEvent.Length - 5));
             if (version != Version.AGA)
             {
@@ -210,7 +219,7 @@ namespace MLLE
         private void Findit(byte value)
         {
             try { Tree.SelectedNode = Tree.Nodes.Find(value.ToString(), true)[0]; }
-            catch { Tree.Nodes.Add(value.ToString(), TexturedJ2L.IniEventListing[SourceForm.J2L.VersionType][value][0]); Findit(value); }
+            catch { Tree.Nodes.Add(value.ToString(), LevelSpecificEventStringList[value][0]); Findit(value); }
         }
         private void ButtonCancel_Click(object sender, EventArgs e) { Close(); }
         public void ResetTree() { Tree.Nodes.Clear(); }
@@ -265,7 +274,7 @@ namespace MLLE
 
         internal void SetupEvent()
         {
-            CurrentEvent = TexturedJ2L.IniEventListing[SourceForm.J2L.VersionType][CurrentEventID];
+            CurrentEvent = LevelSpecificEventStringList[CurrentEventID];
             int[] range;
             string mode;
             SafeToCalculate = false;
@@ -540,7 +549,7 @@ namespace MLLE
                 //bitpush += Convert.ToByte(size.Substring(size.Length-1,1));
                 bitpush += GetNumberAtEndOfString(CurrentEvent[i + 5], false);
             }
-            result |= WorkingEvent.ID & (0xFFFFFFFFu << bitpush); //keep hidden parameter values
+            result |= WorkingEvent.ID & (uint)(0xFFFFFFFFuL << bitpush); //keep hidden parameter values
             return result;
         }
 
@@ -592,12 +601,60 @@ namespace MLLE
         {
             WorkingEvent.ID = newEvent;
             CurrentEventID = (byte)(WorkingEvent.ID & 255);
-            CurrentEvent = TexturedJ2L.IniEventListing[SourceForm.J2L.VersionType][CurrentEventID];
+            CurrentEvent = LevelSpecificEventStringList[CurrentEventID];
             SafeToCacheOldParameters = false;
             CheckEverythingForThisNewEvent();
             Tree_AfterSelect(null, null);
             SafeToCacheOldParameters = true;
             Bitfield.Text = Convert.ToString((int)WorkingEvent.ID, 2).PadLeft(32, '0');
+        }
+
+        private void EventNameInput_TextChanged(object sender, EventArgs e)
+        {
+            ListBox.Items.Clear();
+            if (ListBox.Visible = (EventNameInput.Text.Length > 0))
+            {
+                ListBox.Items.AddRange(FlatEventList.Where(i => System.Globalization.CultureInfo.InvariantCulture.CompareInfo.IndexOf(i.String, EventNameInput.Text, System.Globalization.CompareOptions.IgnoreCase) >= 0).Cast<object>().ToArray());
+            }
+        }
+
+        private void ListBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (ListBox.SelectedItem != null)
+            {
+                var results = Tree.Nodes.Find(((Mainframe.StringAndIndex)ListBox.SelectedItem).Index.ToString(), true);
+                if (results.Length == 1)
+                {
+                    EventNameInput.Clear();
+                    Tree.SelectedNode = results[0];
+                }
+            }
+        }
+
+        private void Tree_DrawNode(object sender, DrawTreeNodeEventArgs e)
+        {
+            if (!(e.DrawDefault = e.Node.Nodes.Count == 0)) //folder node
+            {
+                Rectangle bounds = e.Bounds;
+                if (e.Node.Parent != null) bounds.X += Tree.Indent;
+                ControlPaint.DrawCheckBox(//https://stackoverflow.com/questions/22382471/ownerdrawn-treeview-winforms
+                    e.Graphics,
+                    new Rectangle(
+                        new Point(bounds.X, bounds.Y + 1),
+                        Tree.ImageList.ImageSize
+                    ),
+                    e.Node.IsExpanded ? ButtonState.Checked : ButtonState.Normal
+                );
+                bounds.X += Tree.ImageList.ImageSize.Width + 2;
+                Font font = new Font((sender as TreeView).Font, FontStyle.Bold);
+                if (e.Node.IsSelected)
+                    e.Graphics.FillRectangle(SystemBrushes.Highlight, bounds);
+                StringFormat stringFormat = new StringFormat
+                {
+                    LineAlignment = StringAlignment.Center
+                };
+                e.Graphics.DrawString(e.Node.Text, font, e.Node.IsSelected ? SystemBrushes.HighlightText : SystemBrushes.ControlText, bounds, stringFormat);
+            }
         }
 
         int i, s, v, sets;
@@ -607,7 +664,7 @@ namespace MLLE
         {
             if (j2a == null)
             {
-                j2a = new BinaryReader(File.Open(Path.Combine(SourceForm.DefaultDirectories[version], "Anims.j2a"), FileMode.Open, FileAccess.Read), J2File.FileEncoding);
+                j2a = new BinaryReader(File.Open(Path.Combine(SourceForm.DefaultDirectories[version], "Anims.j2a"), FileMode.Open, FileAccess.Read, FileShare.Read), J2File.FileEncoding);
                 j2a.ReadBytes(24);
                 sets = j2a.ReadInt32();
             }

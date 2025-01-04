@@ -54,6 +54,14 @@ class TexturedJ2L : J2LFile
         {Version.AGA, 0 },
         {Version.GorH, 0 },
         };
+    internal static Dictionary<Version, int> EventSpriteAtlas = new Dictionary<Version, int> {
+        {Version.BC, 0 },
+        {Version.O, 0 },
+        {Version.JJ2, 0 },
+        {Version.TSF, 0 },
+        //{Version.AGA, 0 },
+        {Version.GorH, 0 },
+        };
     internal static Dictionary<Version, string[]> TileTypeNames = new Dictionary<Version, string[]> {
         {Version.BC, null },
         {Version.O, null },
@@ -199,17 +207,10 @@ class TexturedJ2L : J2LFile
     }
     public Bitmap[] RenderTilesetAsImage(TransparencySource source, bool includeMasks, Palette palette = null) //very similar to TilesetForm::CreateImageFromTileset
     {
-        if (palette == null)
-            palette = Palette;
         uint imageHeight = (TileCount + 9) / 10 * 32;
 
         var image = new Bitmap(320, (int)imageHeight, System.Drawing.Imaging.PixelFormat.Format8bppIndexed);
-        var paletteD = image.Palette;
-        var entries = paletteD.Entries;
-        entries[0] = Color.FromArgb(87, 0, 203);
-        for (uint i = 1; i < Palette.PaletteSize; ++i)
-            entries[i] = Palette.Convert(palette.Colors[i]);
-        image.Palette = paletteD;
+        (palette ?? Palette).Apply(image, Color.FromArgb(87, 0, 203));
         var data = image.LockBits(new Rectangle(0, 0, image.Width, image.Height), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format8bppIndexed);
         byte[] bytes = new byte[data.Height * data.Stride];
 
@@ -224,7 +225,7 @@ class TexturedJ2L : J2LFile
             var paletteM = mask.Palette;
             paletteM.Entries[0] = Color.FromArgb(87, 0, 203);
             paletteM.Entries[1] = Color.Black;
-            mask.Palette = paletteD;
+            mask.Palette = image.Palette;
         }
 
         for (ushort tileInLevelID = 0; tileInLevelID < TileCount; tileInLevelID++)
@@ -350,9 +351,14 @@ class TexturedJ2L : J2LFile
             return result;
         }
     }
-    public static void ProduceEventAndTypeListsFromIni(Version version, IniFile eventIni, IniFile typeIni, bool overwriteOldLists = false)
+    public static string[] GetDontUseEventListingForEventID(byte eventID)
     {
-        if (!overwriteOldLists && !(EventAtlas[version] == 0 || IniEventListing[version] == null)) return;
+        return new string[] { (eventID == 0) ? "(none)" : "Event " + eventID.ToString(), "-", "", "DON'T", "USE" };
+    }
+    public static void ProduceEventStringsFromIni(Version version, IniFile eventIni, IniFile typeIni, bool overwriteOldLists = false)
+    {
+        if (!overwriteOldLists && IniEventListing[version] != null)
+            return;
         string[][] StringList = IniEventListing[version] = new string[256][];
         for (int i = 0; i < 256; i++)
         {
@@ -361,46 +367,181 @@ class TexturedJ2L : J2LFile
                 StringList[i] = (((eventIni != typeIni && typeIni.IniReadValue("Events", i.ToString()).Length > 0) ? typeIni : eventIni).IniReadValue("Events", i.ToString()).Split('|'));
                 for (byte j = 0; j < StringList[i].Length; j++) StringList[i][j] = StringList[i][j].TrimEnd();
             }
-            else StringList[i] = new string[] { (i == 0) ? "(none)" : "Event " + i.ToString(), "-", "", "DON'T", "USE" };
+            else StringList[i] = GetDontUseEventListingForEventID((byte)i);
         }
-        StringFormat formatEvent = new StringFormat(), formatType = new StringFormat();
-        formatEvent.Alignment = formatEvent.LineAlignment = formatType.LineAlignment = StringAlignment.Center;
-        formatType.Alignment = StringAlignment.Near;
-        SolidBrush white = new SolidBrush(Color.White);
-        RectangleF rectE = new RectangleF(-16, 0, 64, 32);
+    }
+    public static void ProduceTypeIcons(Version version, IniFile typeIni, bool overwriteOldImage = false)
+    {
+        if (!overwriteOldImage && TileTypeAtlas[version] != 0)
+            return;
+        
         RectangleF rectT = new RectangleF(-2, 0, 256, 32);
-        using (Font arial = new Font(new FontFamily("Arial"), 8)) using (Bitmap text_bmp = new Bitmap(512, 512)) using (Bitmap type_bmp = new Bitmap(128,128)) using (formatType) using (formatEvent)
-        {
-            Bitmap single_bmp; Graphics gfx;
-            Graphics totalgfx = Graphics.FromImage(text_bmp);
-            totalgfx.Clear(Color.FromArgb(128, 0, 0, 0));
-            for (int i = 1; i < 256; i++)
-                {
-                    single_bmp = new Bitmap(32, 32);
-                    gfx = Graphics.FromImage(single_bmp);
-                    //gfx.Clear(Color.FromArgb(128, 0, 0, 0));
-                    if (StringList[i].Length > 4 && StringList[i][4].TrimEnd() != "") gfx.DrawString(StringList[i][3] + "\n" + StringList[i][4], arial, white, rectE, formatEvent);
-                    else gfx.DrawString(StringList[i][3], arial, white, rectE, formatEvent);
-                    totalgfx.DrawImage(single_bmp,i%16*32, i/16*32);
-                }
-            if (EventAtlas[version] != 0)
-                GL.DeleteTexture(EventAtlas[version]);
-            EventAtlas[version] = TexUtil.CreateTextureFromBitmap(text_bmp);
 
-            totalgfx = Graphics.FromImage(type_bmp);
+        using (SolidBrush white = new SolidBrush(Color.White))
+        using (Font arial = new Font(new FontFamily("Arial"), 8))
+        using (Bitmap type_bmp = new Bitmap(128, 128))
+        using (Graphics totalgfx = Graphics.FromImage(type_bmp))
+        using (StringFormat formatType = new StringFormat())
+        {
+            formatType.LineAlignment = StringAlignment.Center;
+            formatType.Alignment = StringAlignment.Near;
             totalgfx.Clear(Color.FromArgb(128, 0, 0, 0));
             TileTypeNames[version] = new string[16];
-            for (int i = 1; i < 16; i++) if ((TileTypeNames[version][i] = typeIni.IniReadValue("Tiles", i.ToString()) ?? "") != "")
-                {
-                    single_bmp = new Bitmap(32, 32);
-                    gfx = Graphics.FromImage(single_bmp);
-                    //gfx.Clear(Color.FromArgb(128, 0, 0, 0));
-                    gfx.DrawString(typeIni.IniReadValue("Tiles", i.ToString()), arial, white, rectT, formatType);
-                    totalgfx.DrawImage(single_bmp, i % 4 * 32, i / 4 * 32);
-                }
+
+            for (int i = 1; i < 16; i++)
+                if ((TileTypeNames[version][i] = typeIni.IniReadValue("Tiles", i.ToString()) ?? "") != "")
+                    using (Bitmap single_bmp = new Bitmap(32, 32))
+                    using (Graphics gfx = Graphics.FromImage(single_bmp))
+                    {
+                        gfx.DrawString(typeIni.IniReadValue("Tiles", i.ToString()), arial, white, rectT, formatType);
+                        totalgfx.DrawImage(single_bmp, i % 4 * 32, i / 4 * 32);
+                    }
             if (TileTypeAtlas[version] != 0)
                 GL.DeleteTexture(TileTypeAtlas[version]);
             TileTypeAtlas[version] = TexUtil.CreateTextureFromBitmap(type_bmp);
+        }
+    }
+    public static void ProduceEventIcons(Version version, string[][] StringList, ref bool[] whichAreDrawnAsText, ref System.Windows.Forms.ImageList treeImageList, bool overwriteOldImage = false, byte? GeneratorEventID = null, string spriteFilename = "")
+    {
+        if (!overwriteOldImage && EventAtlas[version] != 0)
+            return;
+        if (whichAreDrawnAsText == null)
+            whichAreDrawnAsText = new bool[256];
+
+        RectangleF rectE = new RectangleF(-16, 0, 64, 32);
+
+        using (SolidBrush white = new SolidBrush(Color.White))
+        using (Font arial = new Font(new FontFamily("Arial"), 8))
+        using (Bitmap text_bmp = new Bitmap(512, 512))
+        using (Bitmap text_bmp2 = (spriteFilename != "" && EventSpriteAtlas.ContainsKey(version)) ? new Bitmap(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "MLLE Event Sprites - " + spriteFilename + ".png")) : new Bitmap(1, 1))
+        using (Graphics totalgfx = Graphics.FromImage(text_bmp))
+        using (Graphics totalgfx2 = Graphics.FromImage(text_bmp2))
+        using (StringFormat formatEvent = new StringFormat())
+        {
+            formatEvent.Alignment = formatEvent.LineAlignment = StringAlignment.Center;
+            totalgfx.Clear(Color.FromArgb(128, 0, 0, 0));
+            treeImageList.Images.Add(new Bitmap(1, 1)); //event 0
+            for (int i = 1; i < 256; i++)
+            {
+                if (i != GeneratorEventID)
+                {
+                    using (Bitmap single_bmp = new Bitmap(32, 32))
+                    using (Graphics gfx = Graphics.FromImage(single_bmp))
+                    {
+                        if (StringList[i].Length > 4 && StringList[i][4].TrimEnd() != "")
+                            gfx.DrawString(StringList[i][3] + "\n" + StringList[i][4], arial, white, rectE, formatEvent);
+                        else
+                            gfx.DrawString(StringList[i][3], arial, white, rectE, formatEvent);
+                        totalgfx.DrawImage(single_bmp,i%16*32, i/16*32);
+                        if (text_bmp2.Width == 1024) //not AGA
+                            if (whichAreDrawnAsText[i] || ((text_bmp2.GetPixel(i % 16 * 64 + 32, i / 16 * 64 + 32).A == 0) && (whichAreDrawnAsText[i] = true))) { //a custom event, or else there's no sprite defined for this event, as measured by checking the middle pixel
+                                int x = i % 16 * 64 + 16, y = i / 16 * 64 + 16;
+                                totalgfx2.Clip = new Region(new Rectangle(x - 16, y - 16, 64, 64));
+                                totalgfx2.Clear(Color.Transparent);
+                                totalgfx2.ResetClip();
+                                totalgfx2.FillRegion(new SolidBrush(Color.FromArgb(128, 0, 0, 0)), new Region(new Rectangle(x, y, 32, 32)));
+                                totalgfx2.DrawImage(single_bmp, x, y, 32, 32); //use the standard text preview instead
+                                treeImageList.Images.Add(new Bitmap(1,1));
+                            } else {
+                                int size = treeImageList.ImageSize.Height; //same as width
+                                Bitmap dst = new Bitmap(size, size);
+                                int srcLeft = i % 16 * 64;
+                                int srcTop = i / 16 * 64;
+                                var bottom = 0;
+                                var left = 64;
+                                var right = 0;
+                                var top = 64;
+
+                                var bmpData = text_bmp2.LockBits(new Rectangle(srcLeft, srcTop, 64, 64), System.Drawing.Imaging.ImageLockMode.ReadOnly, text_bmp2.PixelFormat);
+                                unsafe //https://stackoverflow.com/questions/248141/remove-surrounding-whitespace-from-an-image
+                                {
+                                    var dataPtr = (byte*)bmpData.Scan0;
+
+                                    for (var y = 0; y < 64; y++)
+                                    {
+                                        for (var x = 0; x < 64; x++)
+                                        {
+                                            if ((dataPtr + x*4)[3] != 0)
+                                            {
+                                                if (x < left)
+                                                    left = x;
+
+                                                if (x >= right)
+                                                    right = x + 1;
+
+                                                if (y < top)
+                                                    top = y;
+
+                                                if (y >= bottom)
+                                                    bottom = y + 1;
+                                            }
+                                        }
+
+                                        dataPtr += bmpData.Stride;
+                                    }
+                                }
+                                text_bmp2.UnlockBits(bmpData);
+                                if (right != 0)
+                                {
+                                    int width = right - left;
+                                    int height = bottom - top;
+                                    if (width < size)
+                                    {
+                                        left -= (size - width) / 2;
+                                        width = size;
+                                    }
+                                    if (height < size)
+                                    {
+                                        top -= (size - height) / 2;
+                                        height = size;
+                                    }
+                                    if (width > height)
+                                    {
+                                        top -= (width - height) / 2;
+                                        height = width;
+                                    }
+                                    else if (height > width)
+                                    {
+                                        left -= (height - width) / 2;
+                                        width = height;
+                                    }
+                                    using (Graphics g = Graphics.FromImage(dst))
+                                    {
+                                        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                                        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                                        g.DrawImage(
+                                            text_bmp2,
+                                            new Rectangle(0, 0, dst.Width, dst.Height),
+                                            new Rectangle(srcLeft + left, srcTop + top, width, height),
+                                            GraphicsUnit.Pixel
+                                        );
+                                    }
+                                    treeImageList.Images.Add(dst);
+                                }
+                                else
+                                    treeImageList.Images.Add(new Bitmap(1, 1));
+                            }
+                    }
+                }
+                else
+                {
+                    totalgfx.Clip = new Region(new Rectangle(i % 16 * 32, i / 16 * 32, 32, 32));
+                    totalgfx.Clear(Color.Transparent);
+                    using (Bitmap single_bmp = new Bitmap(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Generator.png")))
+                    totalgfx.DrawImage(single_bmp, i % 16 * 32, i / 16 * 32);
+                    totalgfx.ResetClip();
+                    treeImageList.Images.Add(new Bitmap(1, 1));
+                }
+            }
+            if (EventAtlas[version] != 0)
+                GL.DeleteTexture(EventAtlas[version]);
+            EventAtlas[version] = TexUtil.CreateTextureFromBitmap(text_bmp);
+            if (text_bmp2.Width == 1024) //not AGA
+            {
+                if (EventSpriteAtlas[version] != 0)
+                    GL.DeleteTexture(EventSpriteAtlas[version]);
+                EventSpriteAtlas[version] = TexUtil.CreateTextureFromBitmap(text_bmp2);
+            }
         }
     }
 }
